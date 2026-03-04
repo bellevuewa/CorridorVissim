@@ -5,21 +5,42 @@ from vissim.utils import start_vissim
 PROJECT_NAME = '2024_PM_V8'
 WORKING_PATH = r'I:\Modeling and Analysis Group\02_Model Applications\021ProjectModeling\021_Studies\156th_corridor_study\VISSIM' + f'\{PROJECT_NAME}'
 PUA_FILE_PATH = r'I:\Modeling and Analysis Group\02_Model Applications\021ProjectModeling\021_Studies\156th_corridor_study\VISSIM' + f'\{PROJECT_NAME}' + r'\2024_Signals'
-RANDOM_SEEDS = [30, 32, 34, 39, 42, 47, 49, 55, 56, 57]
-# evaluation time settings (in seconds)
+# simulation settings
 EVAL_FROM_TIME = 0
 EVAL_TO_TIME = 5400
 EVAL_INTERVAL = 900
 PERIOD_TIME = 5400  # simulation second [s]
 STEP_TIME = 1
+RANDOM_SEEDS = [30, 32, 34]#, 39, 42, 47, 49, 55, 56, 57]
 
+# coordination parameters
+COORD_OFFSET = [17, 
+                9, 
+                17, 
+                17, 
+                16, 
+                14, 
+                14,
+                ]  # offset in seconds for each coordinated signal group
 # coordination signals
-COORD_SIGNALS = [[60, 335],
+COORD_SIGNALS = [[335, 60],
                  [60, 61],
                  [61, 62],
-                 [63, 337, 338], # 67, 66
-                 [63, 336], # 70,  # all NT/ST
+                 [62, 338],
+                 [338, 336],  # 66, 70
+                 [336, 337],  # 70, 67
+                 [337, 63],
                  ]
+
+# # Stage timing constraints (in seconds)
+# STAGE_TIMING = {
+#     335: {'stage_C': 20},  # Signal 335 stage C duration: 20s
+#     60: {'stage_C': 10, 'stage_F': 10},  # Signal 60 stage C: 10s, then stage F: 10s
+#     338: {'stage_C': 20},  # Signal 338 stage C duration: 20s
+#     336: {'stage_C': 10, 'stage_F': 10},  # Signal 336 stage C: 10s, then stage F: 10s
+#     337: {'stage_C': 30},  # Signal 337 stage C duration: 30s
+#     63: {'stage_C': 10, 'stage_D': 10, 'stage_F': 10}  # Signal 63 stage C: 10s, stage D: 10s, stage F: 10s
+# }
 
 CROSSING_NAMES = ['SG102', 'SG104', 'SG106', 'SG108']
 
@@ -146,6 +167,91 @@ def get_active_stage(sc_id, stages_all, green_groups_sc):
     return None
 
 
+def enforce_adaptive_stage_timing(signal_controls, stages, stage_transition_time, previous_stage, lead_sc_id, coordinated_sc_ids, lead_stage_tracking):
+    """
+    Adaptive stage timing using PREVIOUS cycle's lead stage_C duration.
+    
+    - When lead completes stage_C, store its total duration
+    - In NEXT cycle, use that stored duration to calculate half-duration
+    - Coordinated signals run 2 stages, each for (previous_stage_C_duration / 2)
+    
+    Example:
+    - Cycle 1: Lead runs stage_C for 20s → store as previous_duration
+    - Cycle 2: Coordinated runs stage_C(10s) then stage_F(10s), based on previous 20s
+    """
+    try:
+        # Get lead signal's current stage
+        sc_lead = signal_controls.ItemByKey(lead_sc_id)
+        active_groups_lead = get_active_signal_groups(sc_lead)
+        current_lead_stage = get_active_stage(lead_sc_id, stages, active_groups_lead)
+        
+        # Detect when lead EXITS stage_C to capture and store final duration
+        if lead_sc_id in previous_stage and previous_stage[lead_sc_id] == 'stage_C' and current_lead_stage != 'stage_C':
+            # Lead just exited stage_C, store the duration for next cycle
+            if lead_sc_id in stage_transition_time and 'stage_C' in stage_transition_time[lead_sc_id]:
+                final_duration = stage_transition_time[lead_sc_id]['stage_C']
+                # ONLY store the previous stage_C duration
+                lead_stage_tracking[lead_sc_id] = final_duration
+            return
+        
+        # Only enforce when lead is in stage_C
+        if current_lead_stage != 'stage_C':
+            return
+        
+        # Get the PREVIOUS stage_C duration from last cycle
+        if lead_sc_id not in lead_stage_tracking:
+            # First cycle, use current duration as fallback
+            if lead_sc_id in stage_transition_time and 'stage_C' in stage_transition_time[lead_sc_id]:
+                previous_duration = stage_transition_time[lead_sc_id]['stage_C']
+            else:
+                return
+        else:
+            # Use stored previous duration
+            previous_duration = lead_stage_tracking[lead_sc_id]
+        
+        half_duration = previous_duration / 2.0
+        
+        # Enforce timing for coordinated signals based on PREVIOUS lead cycle's duration
+        for coord_sc_id in coordinated_sc_ids:
+            sc_coord = signal_controls.ItemByKey(coord_sc_id)
+            active_groups_coord = get_active_signal_groups(sc_coord)
+            current_coord_stage = get_active_stage(coord_sc_id, stages, active_groups_coord)
+            
+            if coord_sc_id not in stage_transition_time:
+                continue
+            
+            if current_coord_stage not in stage_transition_time[coord_sc_id]:
+                continue
+            
+            time_in_coord_stage = stage_transition_time[coord_sc_id][current_coord_stage]
+            
+            # Check if coordinated signal should transition at half-duration
+            if time_in_coord_stage >= half_duration:
+                # Get available stages for this signal
+                available_stages = list(stages[coord_sc_id].keys())
+                
+                # Find next stage (prefer the one after current, or loop)
+                current_idx = available_stages.index(current_coord_stage) if current_coord_stage in available_stages else 0
+                next_stage_idx = (current_idx + 1) % len(available_stages)
+                next_stage = available_stages[next_stage_idx]
+                
+                # Force transition to next stage
+                stage_groups = stages[coord_sc_id].get(next_stage, [])
+                signal_groups = sc_coord.SGs
+                for sg in signal_groups:
+                    sg_name = sg.AttValue('Name')
+                    if sg_name in stage_groups:
+                        sg.SetAttValue('SigState', 'GREEN')
+                    else:
+                        sg.SetAttValue('SigState', 'RED')
+                
+                # Reset timing for next stage
+                previous_stage[coord_sc_id] = next_stage
+                stage_transition_time[coord_sc_id][next_stage] = 0
+    except:
+        pass
+
+
 def whether_stage_transition(yellow_groups_lead, active_groups_lead):
     yellow_signal_names = ['NBT', 'NBTR', 'NBTRL',
                            'SBT', 'SBTR', 'SBTRL',
@@ -206,6 +312,66 @@ def coordinate_signal_stages(scs_coordinated, all_signal_controls, all_stages, s
             continue  # user's opening features during simualtion
 
 
+def coordinate_signal_stages_with_offset(scs_coordinated, all_signal_controls, all_stages, stage_lead, 
+                                         whether_lead_transition, offset_seconds, stage_transition_time, lead_signal_id, coordinated_stage_start_time):
+    """
+    Coordinate signal stages with a time offset.
+    
+    Args:
+        scs_coordinated: List of coordinated signal controller IDs
+        all_signal_controls: Signal controls object
+        all_stages: Dictionary of stages for each controller
+        stage_lead: Current stage of lead signal
+        whether_lead_transition: Type of transition
+        offset_seconds: Offset time in seconds
+        stage_transition_time: Dictionary tracking when each stage transition occurred for each controller
+        lead_signal_id: The ID of the lead signal
+        coordinated_stage_start_time: Dictionary tracking when coordinated signal started transitioning to new stage
+    """
+    # Only coordinate if lead signal is in a stable stage (Not Transition, not in yellow)
+    if whether_lead_transition != 'Not Transition':
+        # Lead is in transition (yellow) or all red, don't coordinate. Let coordinated signals continue naturally.
+        return
+    
+    for coordinated in scs_coordinated:
+        sc_coord = all_signal_controls.ItemByKey(coordinated)
+        signal_groups_coord = sc_coord.SGs
+        
+        # Check if offset time has elapsed since lead signal changed to this stage
+        if lead_signal_id in stage_transition_time and stage_lead and stage_lead in stage_transition_time[lead_signal_id]:
+            time_since_lead_transition = stage_transition_time[lead_signal_id][stage_lead]
+            if time_since_lead_transition < offset_seconds:
+                # During offset wait period, maintain the current stage (do nothing - let VISSIM control it)
+                continue
+        
+        # Offset elapsed and lead signal is stable, now apply coordination
+        try:
+            stage_groups = all_stages[coordinated][stage_lead]
+            
+            # Check if this coordinated signal just started transitioning to the new stage
+            coord_key = f"{coordinated}_{stage_lead}"
+            if coord_key not in coordinated_stage_start_time:
+                # First time transitioning to this stage after offset - start amber phase
+                coordinated_stage_start_time[coord_key] = time_since_lead_transition
+                # Apply amber to indicate transition
+                for sg in signal_groups_coord:
+                    sg_name = sg.AttValue('Name')
+                    if sg_name in stage_groups:
+                        sg.SetAttValue('SigState', 'AMBER')
+                    else:
+                        sg.SetAttValue('SigState', 'RED')
+            else:
+                # Already in transition, apply the actual stage (GREEN/RED)
+                for sg in signal_groups_coord:
+                    sg_name = sg.AttValue('Name')
+                    if sg_name in stage_groups:
+                        sg.SetAttValue('SigState', 'GREEN')
+                    else:
+                        sg.SetAttValue('SigState', 'RED')
+        except:
+            continue  # user's opening features during simualtion
+
+
 def load_project():
     # start vissim
     vissim = start_vissim()
@@ -238,34 +404,84 @@ def main():
         print(f'Running {i+1}th random seed {seed}...')
         # set the random seed for Vissim (not Python's random)
         sim.SetAttValue('RandSeed', seed)
+        
+        # Track stage transitions with offset
+        # stage_transition_time[controller_id][stage_name] = elapsed_time_in_current_stage
+        stage_transition_time = {sc_id: {} for sc_id in signal_control_ids}
+        previous_stage = {sc_id: None for sc_id in signal_control_ids}
+        # Track when coordinated signals start transitioning to new stage
+        coordinated_stage_start_time = {}
+        # Track lead signal stage durations for adaptive timing
+        lead_stage_tracking = {}
+        
         for sim_step in range(EVAL_FROM_TIME, EVAL_FROM_TIME+PERIOD_TIME*STEP_TIME+1):
             sim.RunSingleStep()
             # let signals coordinated
-            for scs in COORD_SIGNALS:
+            for coord_idx, scs in enumerate(COORD_SIGNALS):
                 lead = scs[0]
                 sc_lead = signal_controls.ItemByKey(lead)
                 active_groups_lead = get_active_signal_groups(sc_lead)  # check what stage it is now
                 yellow_groups_lead = get_yellow_signal_groups(sc_lead)  # check what stage it is now
                 stage_lead = get_active_stage(lead, stages, active_groups_lead)
                 whether_lead_transition = whether_stage_transition(yellow_groups_lead, active_groups_lead)
+                
+                # Update stage transition tracking for LEAD signal
+                if stage_lead != previous_stage[lead]:
+                    # New stage detected
+                    previous_stage[lead] = stage_lead
+                    if stage_lead:
+                        stage_transition_time[lead][stage_lead] = 0
+                else:
+                    # Same stage, increment elapsed time
+                    if stage_lead and stage_lead in stage_transition_time[lead]:
+                        stage_transition_time[lead][stage_lead] += STEP_TIME
+                
+                # Update stage transition tracking for all COORDINATED signals
+                for coordinated in scs[1:]:
+                    sc_coord = signal_controls.ItemByKey(coordinated)
+                    active_groups_coord = get_active_signal_groups(sc_coord)
+                    stage_coord = get_active_stage(coordinated, stages, active_groups_coord)
+                    
+                    if stage_coord != previous_stage[coordinated]:
+                        # New stage detected for coordinated signal
+                        previous_stage[coordinated] = stage_coord
+                        if stage_coord:
+                            stage_transition_time[coordinated][stage_coord] = 0
+                    else:
+                        # Same stage, increment elapsed time
+                        if stage_coord and stage_coord in stage_transition_time[coordinated]:
+                            stage_transition_time[coordinated][stage_coord] += STEP_TIME
+                
+                # Enforce adaptive stage timing based on lead signal
+                # Lead runs one stage, coordinated runs two stages (each half the lead's duration)
+                # 335 leads 60: when 335 in C for Xs, 60 runs C(X/2s) then F(X/2s)
+                enforce_adaptive_stage_timing(signal_controls, stages, stage_transition_time, previous_stage, 335, [60], lead_stage_tracking)
+                # 338 leads 336: when 338 in C for Xs, 336 runs C(X/2s) then F(X/2s)
+                enforce_adaptive_stage_timing(signal_controls, stages, stage_transition_time, previous_stage, 338, [336], lead_stage_tracking)
+                # 337 leads 63: when 337 in C for Xs, 63 runs stages with each lasting X/2s
+                enforce_adaptive_stage_timing(signal_controls, stages, stage_transition_time, previous_stage, 337, [63], lead_stage_tracking)
+                
                 if stage_lead == None and whether_lead_transition == 'Not Transition':
                     continue
                 if stage_lead == None and whether_lead_transition == 'Crossing':
                     continue  # vissim configuration is not correct
                 # run the same stage of the coordinated signal controllers
-                if lead == 60 in scs[:1]:
+                if lead == 60:
                     if stage_lead == 'stage_6':
-                        stage_lead = 'stage_2'
-                elif lead == 63 and 336 in scs[1:]:
-                    if stage_lead == 'stage_6':
-                        stage_lead = 'stage_4'
-                elif lead == 63 and 338 in scs[1:]:
-                    if stage_lead == 'stage_5':
                         stage_lead = 'stage_3'
-                    elif stage_lead == 'stage_6':
-                        stage_lead = 'stage_4'
-                coordinate_signal_stages(scs[1:], signal_controls, stages, stage_lead, whether_lead_transition)            
-
+                elif lead == 62 or lead == 336:
+                    if stage_lead == 'stage_4':
+                        stage_lead = 'stage_3'
+                elif lead == 63:
+                    if stage_lead == 'stage_6':
+                        stage_lead = 'stage_1'
+                
+                # Apply coordination with offset for this signal group
+                coordinate_signal_stages_with_offset(scs[1:], signal_controls, stages, stage_lead, 
+                                                     whether_lead_transition, COORD_OFFSET[coord_idx], stage_transition_time, lead, coordinated_stage_start_time)
+        vissim.SaveNet()
+    
+    vissim.Exit()
     vissim = None
 
 

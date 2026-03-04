@@ -14,33 +14,21 @@ STEP_TIME = 1
 RANDOM_SEEDS = [30, 32, 34]#, 39, 42, 47, 49, 55, 56, 57]
 
 # coordination parameters
-COORD_OFFSET = [17, 
+COORD_OFFSET = [9, 
+                5, 
                 9, 
-                17, 
-                17, 
-                16, 
-                14, 
-                14,
+                7,
+                7,
+                8,
                 ]  # offset in seconds for each coordinated signal group
 # coordination signals
 COORD_SIGNALS = [[335, 60],
                  [60, 61],
-                 [61, 62],
-                 [62, 338],
-                 [338, 336],  # 66, 70
-                 [336, 337],  # 70, 67
-                 [337, 63],
+                 [61, 62],                 
+                 [63, 337],
+                 [337, 336],  # 70, 67
+                 [336, 338],  # 66, 70
                  ]
-
-# # Stage timing constraints (in seconds)
-# STAGE_TIMING = {
-#     335: {'stage_C': 20},  # Signal 335 stage C duration: 20s
-#     60: {'stage_C': 10, 'stage_F': 10},  # Signal 60 stage C: 10s, then stage F: 10s
-#     338: {'stage_C': 20},  # Signal 338 stage C duration: 20s
-#     336: {'stage_C': 10, 'stage_F': 10},  # Signal 336 stage C: 10s, then stage F: 10s
-#     337: {'stage_C': 30},  # Signal 337 stage C duration: 30s
-#     63: {'stage_C': 10, 'stage_D': 10, 'stage_F': 10}  # Signal 63 stage C: 10s, stage D: 10s, stage F: 10s
-# }
 
 CROSSING_NAMES = ['SG102', 'SG104', 'SG106', 'SG108']
 
@@ -328,9 +316,9 @@ def coordinate_signal_stages_with_offset(scs_coordinated, all_signal_controls, a
         lead_signal_id: The ID of the lead signal
         coordinated_stage_start_time: Dictionary tracking when coordinated signal started transitioning to new stage
     """
-    # Only coordinate if lead signal is in a stable stage (Not Transition, not in yellow)
-    if whether_lead_transition != 'Not Transition':
-        # Lead is in transition (yellow) or all red, don't coordinate. Let coordinated signals continue naturally.
+    # Allow coordination even during transitions to ensure coordinated signals actually change
+    # Only skip if stage_lead is None (undetectable state)
+    if stage_lead is None:
         return
     
     for coordinated in scs_coordinated:
@@ -352,7 +340,7 @@ def coordinate_signal_stages_with_offset(scs_coordinated, all_signal_controls, a
             coord_key = f"{coordinated}_{stage_lead}"
             if coord_key not in coordinated_stage_start_time:
                 # First time transitioning to this stage after offset - start amber phase
-                coordinated_stage_start_time[coord_key] = time_since_lead_transition
+                coordinated_stage_start_time[coord_key] = 0  # Track amber duration
                 # Apply amber to indicate transition
                 for sg in signal_groups_coord:
                     sg_name = sg.AttValue('Name')
@@ -361,13 +349,30 @@ def coordinate_signal_stages_with_offset(scs_coordinated, all_signal_controls, a
                     else:
                         sg.SetAttValue('SigState', 'RED')
             else:
-                # Already in transition, apply the actual stage (GREEN/RED)
-                for sg in signal_groups_coord:
-                    sg_name = sg.AttValue('Name')
-                    if sg_name in stage_groups:
-                        sg.SetAttValue('SigState', 'GREEN')
-                    else:
+                # Already in transition, track amber duration
+                amber_duration = coordinated_stage_start_time[coord_key]
+                amber_duration += STEP_TIME
+                coordinated_stage_start_time[coord_key] = amber_duration
+                
+                # Maintain amber for 4 seconds, then all red for 1 second, then GREEN
+                if amber_duration < 4:  # 4 second amber phase
+                    for sg in signal_groups_coord:
+                        sg_name = sg.AttValue('Name')
+                        if sg_name in stage_groups:
+                            sg.SetAttValue('SigState', 'AMBER')
+                        else:
+                            sg.SetAttValue('SigState', 'RED')
+                elif amber_duration < 5:  # 1 second all red phase
+                    for sg in signal_groups_coord:
                         sg.SetAttValue('SigState', 'RED')
+                else:
+                    # All red phase complete, apply the actual stage (GREEN/RED)
+                    for sg in signal_groups_coord:
+                        sg_name = sg.AttValue('Name')
+                        if sg_name in stage_groups:
+                            sg.SetAttValue('SigState', 'GREEN')
+                        else:
+                            sg.SetAttValue('SigState', 'RED')
         except:
             continue  # user's opening features during simualtion
 
@@ -431,6 +436,12 @@ def main():
                     previous_stage[lead] = stage_lead
                     if stage_lead:
                         stage_transition_time[lead][stage_lead] = 0
+                    # Clear coordinated_stage_start_time for all coordinated signals when lead stage changes
+                    # This allows them to start fresh with the new lead stage (possibly modified)
+                    coordinated_scs = scs[1:]
+                    coords_to_remove = [key for key in coordinated_stage_start_time if any(key.startswith(f"{coord}_") for coord in coordinated_scs)]
+                    for key in coords_to_remove:
+                        del coordinated_stage_start_time[key]
                 else:
                     # Same stage, increment elapsed time
                     if stage_lead and stage_lead in stage_transition_time[lead]:
@@ -447,19 +458,15 @@ def main():
                         previous_stage[coordinated] = stage_coord
                         if stage_coord:
                             stage_transition_time[coordinated][stage_coord] = 0
+                        # Clear coordinated_stage_start_time entries for this signal when stage changes
+                        # This ensures we track only the current stage transition
+                        coords_to_remove = [key for key in coordinated_stage_start_time if key.startswith(f"{coordinated}_")]
+                        for key in coords_to_remove:
+                            del coordinated_stage_start_time[key]
                     else:
                         # Same stage, increment elapsed time
                         if stage_coord and stage_coord in stage_transition_time[coordinated]:
                             stage_transition_time[coordinated][stage_coord] += STEP_TIME
-                
-                # Enforce adaptive stage timing based on lead signal
-                # Lead runs one stage, coordinated runs two stages (each half the lead's duration)
-                # 335 leads 60: when 335 in C for Xs, 60 runs C(X/2s) then F(X/2s)
-                enforce_adaptive_stage_timing(signal_controls, stages, stage_transition_time, previous_stage, 335, [60], lead_stage_tracking)
-                # 338 leads 336: when 338 in C for Xs, 336 runs C(X/2s) then F(X/2s)
-                enforce_adaptive_stage_timing(signal_controls, stages, stage_transition_time, previous_stage, 338, [336], lead_stage_tracking)
-                # 337 leads 63: when 337 in C for Xs, 63 runs stages with each lasting X/2s
-                enforce_adaptive_stage_timing(signal_controls, stages, stage_transition_time, previous_stage, 337, [63], lead_stage_tracking)
                 
                 if stage_lead == None and whether_lead_transition == 'Not Transition':
                     continue
@@ -468,13 +475,23 @@ def main():
                 # run the same stage of the coordinated signal controllers
                 if lead == 60:
                     if stage_lead == 'stage_6':
-                        stage_lead = 'stage_3'
-                elif lead == 62 or lead == 336:
+                        stage_lead = 'stage_4'
+                elif lead == 62:
                     if stage_lead == 'stage_4':
                         stage_lead = 'stage_3'
                 elif lead == 63:
-                    if stage_lead == 'stage_6':
-                        stage_lead = 'stage_1'
+                    if stage_lead == 'stage_4' or stage_lead == 'stage_6':
+                        stage_lead = 'stage_3'
+                    elif stage_lead == 'stage_5':
+                        stage_lead = 'stage_4'
+                elif lead == 337:
+                    if stage_lead == 'stage_3':
+                        stage_lead = 'stage_4'
+                elif lead == 336:
+                    if stage_lead == 'stage_4':
+                        stage_lead = 'stage_3'
+                    elif stage_lead == 'stage_5':
+                        stage_lead = 'stage_4'
                 
                 # Apply coordination with offset for this signal group
                 coordinate_signal_stages_with_offset(scs[1:], signal_controls, stages, stage_lead, 

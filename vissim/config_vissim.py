@@ -1,52 +1,28 @@
 # Vissim project directory
-WORKING_PATH = r'I:\Modeling and Analysis Group\02_Model Applications\021ProjectModeling\021_Studies\156th_corridor_study\VISSIM\2024_PM_V1'
-PROJECT_NAME = '2024_PM_V1'
+PROJECT_NAME = '2024_PM_V8'
+WORKING_PATH = r'I:\Modeling and Analysis Group\02_Model Applications\021ProjectModeling\021_Studies\156th_corridor_study\VISSIM' + f'\{PROJECT_NAME}'
+PUA_FILE_PATH = r'I:\Modeling and Analysis Group\02_Model Applications\021ProjectModeling\021_Studies\156th_corridor_study\VISSIM' + f'\{PROJECT_NAME}' + r'\2024_Signals'
 PROJECT_PERIOD = 'PM'
 
 # simulation settings
-PERIOD_TIME = 5400  # simulation second [s]
-START_TIME = '16:30:00'
-STEP_TIME = 7  # Number of steps in a second
-RANDOM_SEED_INCR = 1  # random seed increment
-NUM_RUNS = 10  # desired total simulation runs
-USE_MAX_SPEED = True  # if to use max speed
-# if not USE_MAX_SPEED, set SIM_SPEED_FACTOR a value less than 1
-SIM_SPEED_FACTOR = 1.0  # simulated speed factor
-# if not USE_MAX_SPEED, set DYNA_ASSIGN_VOL_INCREMENT a value greater than 0
-DYNA_ASSIGN_VOL_INCREMENT = 0.00  # dynamic assignment volume increment
-USE_ALL_CORES = True  # if to use all cores
-
-# evaluation time settings (in seconds)
 EVAL_FROM_TIME = 0
 EVAL_TO_TIME = 5400
 EVAL_INTERVAL = 900
+PERIOD_TIME = 5400  # simulation second [s]
+STEP_TIME = 1
+RANDOM_SEEDS = [30, 32, 34, 39, 42, 47, 49, 55, 56, 57]
 
-# evaluation measures
-MEASURE_SYNTAX = {
-    'Queue length'          : 'QLen(Current, Current)',
-    'Queue length max'      : 'QLenMax(Current, Current)',
-    'Vehicle stopped delay' : 'StopDelay(Current, Current, All)',
-    'Vehicle delay'         : 'VehDelay(Current, Current, All)',
-    'Stops'                 : 'Stops(Current, Current, All)',
-    'Vehicles'              : 'Vehs(Current, Current, All)',
-    'Ped delay'             : 'PersDelay(Current, Current, All)',
-    'Peds'                  : 'Pers(Current, Current, All)'
+# coordination parameters with offsets
+COORD_SIGNAL_OFFSET = {
+    335: {60: 6},
+    60: {61: 3},
+    61: {62: 6},
+    63: {337: 4},  # 63, 70
+    337: {336: 4},  # 70, 67
+    336: {338: 4},  # 66, 70
 }
 
-# evaluation base settings
-INTERSECTIONS = {
-    1: {'Name': '110thAveNE-NE6thSt',  # key is node ID
-        'Approach': {'NB': 1,
-                     'SB': 2,},  # vehicle travel time measurement ID in Vissim
-        'Movement':  {'NBT': [3, 10],
-                      'NBR': [3, 7],
-                      'NBL': [3, 1],}  # from link id and to link id
-    }
-}
-
-
-
-# SCREELINES = {'Line_148th_In': 2}
+CROSSING_NAMES = ['SG102', 'SG104', 'SG106', 'SG108']
 
 # vehicle counts
 COUNT_COLUMNS = ['Interval Start', 'EB-UT', 'EB-LT', 'EB-TH', 'EB-RT',

@@ -1,30 +1,9 @@
 import os
 import time
 
-from vissim.utils import start_vissim
+from vissim.utils import load_project
+from config_vissim import *
 
-PROJECT_NAME = '2024_PM_V8'
-WORKING_PATH = r'I:\Modeling and Analysis Group\02_Model Applications\021ProjectModeling\021_Studies\156th_corridor_study\VISSIM' + f'\{PROJECT_NAME}'
-PUA_FILE_PATH = r'I:\Modeling and Analysis Group\02_Model Applications\021ProjectModeling\021_Studies\156th_corridor_study\VISSIM' + f'\{PROJECT_NAME}' + r'\2024_Signals'
-# simulation settings
-EVAL_FROM_TIME = 0
-EVAL_TO_TIME = 5400
-EVAL_INTERVAL = 900
-PERIOD_TIME = 5400  # simulation second [s]
-STEP_TIME = 1
-RANDOM_SEEDS = [30, 32, 34, 39, 42, 47, 49, 55, 56, 57]
-
-# coordination parameters with offsets
-COORD_SIGNAL_OFFSET = {
-    335: {60: 6},
-    60: {61: 3},
-    61: {62: 6},
-    63: {337: 4},  # 63, 70
-    337: {336: 4},  # 70, 67
-    336: {338: 4},  # 66, 70
-}
-
-CROSSING_NAMES = ['SG102', 'SG104', 'SG106', 'SG108']
 
 
 def get_stage_signal_groups_from_controller(sc_id):
@@ -414,23 +393,6 @@ def coordinate_signal_stages_with_offset(scs_coordinated, all_signal_controls, a
                         coordinated_stage_start_time[coord_key] = ("COMPLETED", 0)
         except:
             continue  # user's opening features during simualtion
-
-
-def load_project():
-    # start vissim
-    vissim = start_vissim()
-    # load a Vissim project:
-    net_name = os.path.join(WORKING_PATH, f'{PROJECT_NAME}.inpx')
-    
-    # load network
-    flag_read_additionally = True # you can read network(elements) additionally, in this case set flag_read_additionally" to true
-    vissim.LoadNet(net_name, flag_read_additionally)
-    
-    # load layout
-    layout_name = os.path.join(WORKING_PATH, f'{PROJECT_NAME}.layx')
-    vissim.LoadLayout(layout_name)
-    vissim.SaveNetAs(net_name)
-    return vissim
 
 
 def main():

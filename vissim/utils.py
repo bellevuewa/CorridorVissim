@@ -31,14 +31,17 @@ def start_vissim():
     return Vissim
 
 
-def load_project(working_path='', project_name=''):
+def load_project(working_path='', 
+                 project_name='', 
+                 flag_read_additionally = True  # you can read network(elements) additionally, in this case set flag_read_additionally" to true
+                 ):
+    
     # start vissim
     vissim = start_vissim()
     # load a Vissim project:
     net_name = os.path.join(working_path, f'{project_name}.inpx')
     
     # load network
-    flag_read_additionally = True # you can read network(elements) additionally, in this case set flag_read_additionally" to true
     vissim.LoadNet(net_name, flag_read_additionally)
     
     # load layout

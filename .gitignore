@@ -1,5 +1,5 @@
 pdf_table.ipynb
-__pycache__/config.cpython-39.pyc
-__pycache__/config.cpython-311.pyc
+__pycache__/*
 vissim/__pycache__/*
 README_files/*
+FIX_MEMO.md

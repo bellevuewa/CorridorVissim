@@ -18,19 +18,21 @@ CorridorVissim provides automated scripts to manage traffic signal timing and co
 
 ```
 vissim/
-├── control_signal.py          # Signal control and coordination logic
-├── run_vissim.py               # Main VISSIM simulation runner
-├── adjust_volume.py            # Traffic volume adjustment utilities
-├── import_volume.py            # Volume data import functionality
-├── config_vissim.py            # VISSIM-specific configuration
-├── utils.py                    # Common utility functions
-└── logger.conf                 # Logging configuration
+├── control_signal.py                # Signal control and coordination logic
+├── run_vissim.py                    # Main VISSIM simulation runner (sequential)
+├── run_vissim_threaded.py           # Threaded version using ThreadPoolExecutor
+├── run_vissim_queueworkers.py       # Threaded version using worker queue pattern
+├── adjust_volume.py                 # Traffic volume adjustment utilities
+├── import_volume.py                 # Volume data import functionality
+├── config_vissim.py                 # VISSIM-specific configuration
+├── utils.py                         # Common utility functions
+└── logger.conf                      
 ```
 
 ## Getting Started
 
 ### Prerequisites
-- Python 3.x
+- Python 3.9+
 - VISSIM (traffic simulation software)
 
 ### Setup
@@ -45,10 +47,29 @@ vissim/
 
 ## Usage
 
-### Running VISSIM Simulations
-Use `run_vissim.py` to execute traffic simulations with configured signal timings and parameters:
+### Running VISSIM Simulations - Choose Your Implementation
+
+#### Sequential Version (Baseline)
+Standard implementation with coordination running on the main thread:
 ```python
 python vissim/run_vissim.py
+```
+
+#### ThreadPoolExecutor Version
+Parallel coordination logic using thread pools. Adjust `max_workers` parameter in the script for your CPU configuration:
+- `max_workers=2` or
+- `max_workers=3`
+and so on...
+
+```python
+python vissim/run_vissim_threaded.py
+```
+
+#### Queue Workers Version
+Persistent worker threads using producer-consumer pattern. Adjust `num_workers` similarly to ThreadPoolExecutor version:
+
+```python
+python vissim/run_vissim_queueworkers.py
 ```
 
 ### Importing and Configuring Volumes
@@ -59,4 +80,3 @@ python vissim/import_volume.py    # Import volume data
 ```
 
 For detailed usage instructions, refer to individual script docstrings and configuration files.
-
